@@ -24,36 +24,8 @@ from qwen_vl_utils import process_vision_info
 IGNORE_INDEX = -100
 
 
-def parse_llava_style_conversations_tmp(conversations: List[Dict], image_folder : str) -> List[Dict]:
-    messages = []
-    for turn in conversations:
-        if turn['from'] == 'human':
-            tmp_message = []
-            role = 'user'
-            tmp_msg = {'role' : role, 'content' : []}
-            tmp_msg['content'].append({"type":"text", "text":turn['value'].replace('\n<image>', '')})
-            tmp_message.append(tmp_msg)
-        else:
-            role = 'assistant'
-            tmp_msg = {'role' : role, 'content' : []}
-            tmp_msg['content'].append({"type":"text", "text":turn['value']})
-            tmp_message.append(tmp_msg)
-            messages.append(tmp_message)
 
-
-    if 'image' in sample and sample['image']:
-        if len(messages) > 0 and messages[0][0]["role"] == 'user':
-            filename = sample["image"]
-            if image_folder:
-                full_path = os.path.join(image_folder, filename)
-                image_path = f"file://{full_path}"
-            for message in messages:
-                message[0]['content'].insert(0, {"type":"image","image":image_path})
-
-
-    return messages
-
-def parse_llava_style_conversations(sample : dict, image_folder : str) -> List[Dict]:
+def parse_conversations(sample : dict, image_folder : str) -> List[Dict]:
     conversations = sample['conversations']
     messages = []
     for turn in conversations:
@@ -91,8 +63,8 @@ def labeling(input_ids, processor):
     end_substr   = "<|im_end|>"
 
     pos = 0
+    
     while True:
-
         start_pos = text.find(start_substr, pos)
         if start_pos == -1:
             break
@@ -159,7 +131,7 @@ class Qwen2VLListDataset(Dataset):
                 f"Item at index={idx} missing 'conversations' key. keys={sample.keys()}"
             )
 
-        messages = parse_llava_style_conversations(sample, self.image_folder)
+        messages = parse_conversations(sample, self.image_folder)
         text_prompt = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=False
         )
@@ -415,7 +387,9 @@ def train_qwen2vl(attn_implementation='flash_attention_2'):
         raise ValueError("Unknown feature_extractor_setting. Choose 'clip' or 'scores' or modify code.")
 
     rank0_print("Loading Qwen2-VL model ...")
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     if model_args.feature_extractor_setting == "clip":
         model = Qwen2VLForConditionalGeneration_SelfFilter.from_pretrained(
             model_args.model_name_or_path,
@@ -467,7 +441,6 @@ def train_qwen2vl(attn_implementation='flash_attention_2'):
             task_type="CAUSAL_LM",
         )
         if training_args.bits == 16:
-            # 16-bit일 때 fp16/bf16 맞춰서 모델로.
             if training_args.bf16:
                 model.to(torch.bfloat16)
             elif training_args.fp16:
@@ -496,9 +469,9 @@ def train_qwen2vl(attn_implementation='flash_attention_2'):
    
     print('prepareing dataaset....')
     data_module = make_qwen2vl_list_data_module(
-        data_path=data_args.data_path,  # 위 JSON
+        data_path=data_args.data_path, 
         processor=processor,
-        image_folder=data_args.image_folder,   # 실제 이미지 폴더
+        image_folder=data_args.image_folder, 
         partial_assistant=True,
         max_length=2048
     )
